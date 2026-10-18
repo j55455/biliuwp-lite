@@ -36,6 +36,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup NuGet.exe
+        uses: nuget/setup-nuget@v2
+        with:
+          nuget-version: 'latest'
+
       - name: Setup MSBuild.exe
         uses: microsoft/setup-msbuild@v2
 
@@ -58,7 +63,14 @@ jobs:
           $manifest.Package.Identity.Version = "${{ github.event.inputs.version }}"
           $manifest.Save("$PWD\$env:UWP_Project_Directory\Package.appxmanifest")
 
-      - name: Build x64
+      - name: Restore Solution NuGet Packages
+        run: |
+          nuget restore $env:Solution_Path
+          if (Test-Path ".\packages") {
+            Copy-Item -Path ".\packages" -Destination ".\src\" -Recurse -Force
+          }
+
+      - name: Build x64 Package
         run: |
           msbuild $env:UWP_Project_Directory `
             /p:Platform=x64 `
@@ -66,19 +78,11 @@ jobs:
             /p:PackageCertificateKeyFile=$env:SigningCertificate `
             /p:PackageCertificatePassword=$env:SigningCertificatePasswd `
             /p:BuildMode=SideloadOnly `
-            /restore `
-            /bl:C:\msbuild.binlog `
-            /v:normal
+            /p:Use64BitCompiler=true `
+            /restore
         env:
           BuildMode: SideloadOnly
           Configuration: Release
-
-      - name: Upload Binlog on Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: msbuild-binlog
-          path: C:\msbuild.binlog
 
       - name: Package Output Archive
         run: |
