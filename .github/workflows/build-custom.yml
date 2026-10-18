@@ -42,10 +42,9 @@ jobs:
           nuget-version: 'latest'
 
       - name: Setup MSBuild.exe
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v1.3.1
 
-      - name: Setup Windows 10 SDK
-        uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.4
+      - uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.4
         with:
           sdk-version: 19041
 
@@ -55,7 +54,6 @@ jobs:
           $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=muyan" -KeyUsage DigitalSignature -FriendlyName "BiliLite" -CertStoreLocation "Cert:\CurrentUser\My"
           Export-PfxCertificate -Cert $cert -FilePath "$env:UWP_Project_Directory\$env:SigningCertificate" -Password $pwd
           Export-Certificate -Cert $cert -FilePath "$env:UWP_Project_Directory\BiliLite.cer"
-          # 导入到 runner 受信任存储
           Import-Certificate -FilePath "$env:UWP_Project_Directory\BiliLite.cer" -CertStoreLocation "Cert:\LocalMachine\Root"
           Import-Certificate -FilePath "$env:UWP_Project_Directory\BiliLite.cer" -CertStoreLocation "Cert:\LocalMachine\TrustedPeople"
 
@@ -72,18 +70,9 @@ jobs:
             Copy-Item -Path ".\packages" -Destination ".\src\" -Recurse -Force
           }
 
-      - name: Build x64 Package
+      - name: Build x64
         run: |
-          msbuild $env:UWP_Project_Directory `
-            /p:Platform=x64 `
-            /p:Configuration=Release `
-            /p:PackageCertificateKeyFile=$env:SigningCertificate `
-            /p:PackageCertificatePassword=$env:SigningCertificatePasswd `
-            /p:BuildMode=SideloadOnly `
-            /p:AppxBundle=Never `
-            /p:UapAppxPackageBuildMode=SideloadOnly `
-            /p:Use64BitCompiler=true `
-            /m:1
+          msbuild $env:UWP_Project_Directory /p:Platform=x64 /p:Configuration=Release /p:PackageCertificateKeyFile=$env:SigningCertificate /p:PackageCertificatePassword=$env:SigningCertificatePasswd /restore
         env:
           BuildMode: SideloadOnly
           Configuration: Release
