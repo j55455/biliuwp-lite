@@ -1,116 +1,35 @@
-<#
-.SYNOPSIS
-¼ì²é²¢¸üĞÂShakaPlayer°æ±¾
+ï»¿# é¢„æ„å»ºè„šæœ¬ï¼šæ£€æŸ¥å¹¶æ›´æ–° ShakaPlayer WebPlayer èµ„æº
+param()
 
-.DESCRIPTION
-1. ¼ì²éAssets/ShakaPlayerÏÂÊÇ·ñÓĞversion.jsonÎÄ¼ş
-2. Èç¹ûÃ»ÓĞ£¬Ôò´ÓGitHub releaseÏÂÔØ×îĞÂ°æ±¾
-3. Èç¹ûÓĞ£¬Ôò¼ì²éÊÇ·ñÊÇ×îĞÂ°æ±¾
-#>
-
-# ÉèÖÃµ±Ç°½Å±¾ËùÔÚÄ¿Â¼Îª¹¤×÷Ä¿Â¼
-$scriptDir = $PSScriptRoot
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 if (-not $scriptDir) {
-    $scriptDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
+    $scriptDir = $PSScriptRoot
 }
-Set-Location -Path $scriptDir
 
-# ÅäÖÃ²ÎÊı
-$repoOwner = "ywmoyue"
-$repoName = "BiliLite-WebPlayer"
 $assetsPath = Join-Path -Path $scriptDir -ChildPath "Assets/ShakaPlayer"
 $versionFile = Join-Path -Path $assetsPath -ChildPath "version.json"
-$tempZipPath = Join-Path -Path $env:TEMP -ChildPath "WebPlayer-latest.zip"
 
-# ´´½¨Ä¿Â¼£¨Èç¹û²»´æÔÚ£©
-if (-not (Test-Path -Path $assetsPath)) {
+# æœ¬åœ°å·²å­˜åœ¨èµ„æºï¼Œç›´æ¥é€€å‡º
+if (Test-Path $versionFile) {
+    Write-Host "WebPlayer assets already exist. Skipping download."
+    exit 0
+}
+
+if (-not (Test-Path $assetsPath)) {
     New-Item -ItemType Directory -Path $assetsPath -Force | Out-Null
 }
 
-# »ñÈ¡GitHub×îĞÂreleaseĞÅÏ¢
 try {
-    $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/latest" -Headers @{
-        "Accept" = "application/vnd.github.v3+json"
-    }
-    
-    $latestTag = $releaseInfo.tag_name
-    $latestCommit = $releaseInfo.target_commitish
+    $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/ywmoyue/BiliLite-WebPlayer/releases/latest" -Headers @{ "Accept" = "application/vnd.github.v3+json" }
     $asset = $releaseInfo.assets | Where-Object { $_.name -like "WebPlayer-*.zip" } | Select-Object -First 1
-    
-    if (-not $asset) {
-        throw "Î´ÕÒµ½WebPlayer-*.zipÎÄ¼ş"
+    if ($asset) {
+        $tempZip = Join-Path $env:TEMP "WebPlayer-latest.zip"
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempZip -UseBasicParsing
+        Expand-Archive -Path $tempZip -DestinationPath $assetsPath -Force
+        $ver = @{ tag = $releaseInfo.tag_name; commit = $releaseInfo.target_commitish } | ConvertTo-Json
+        $ver | Set-Content $versionFile
     }
-    
-    $downloadUrl = $asset.browser_download_url
+} catch {
+    Write-Warning "Failed to fetch WebPlayer: $_"
+    exit 0
 }
-catch {
-    Write-Error "»ñÈ¡GitHub releaseĞÅÏ¢Ê§°Ü: $_"
-    # ¼ì²éÊÇ·ñÊÇAPIÏŞÖÆÇÒ±¾µØ°æ±¾ÎÄ¼ş´æÔÚ
-    if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 403 -and 
-        $_.Exception.Message -like "*API rate limit*" -and 
-        (Test-Path -Path $versionFile)) {
-        Write-Warning "GitHub APIÏŞÖÆ£¬µ«±¾µØ°æ±¾ÎÄ¼ş´æÔÚ£¬Ìø¹ı¸üĞÂ"
-        exit 0
-    }
-    exit 1
-}
-
-# ¼ì²é±¾µØ°æ±¾ÎÄ¼ş
-$needUpdate = $true
-
-if (Test-Path -Path $versionFile) {
-    try {
-        $localVersion = Get-Content -Path $versionFile | ConvertFrom-Json
-        
-        if ($localVersion.tag -eq $latestTag -and $localVersion.commit -eq $latestCommit) {
-            Write-Host "µ±Ç°ÒÑÊÇ×îĞÂ°æ±¾ (Tag: $latestTag, Commit: $latestCommit)"
-            $needUpdate = $false
-        }
-        else {
-            Write-Host "·¢ÏÖĞÂ°æ±¾:"
-            Write-Host "±¾µØ°æ±¾ - Tag: $($localVersion.tag), Commit: $($localVersion.commit)"
-            Write-Host "×îĞÂ°æ±¾ - Tag: $latestTag, Commit: $latestCommit"
-        }
-    }
-    catch {
-        Write-Warning "¶ÁÈ¡±¾µØversion.jsonÊ§°Ü: $_"
-        $needUpdate = $true
-    }
-}
-else {
-    Write-Host "Î´ÕÒµ½version.jsonÎÄ¼ş£¬½«ÏÂÔØ×îĞÂ°æ±¾"
-}
-
-# Èç¹ûĞèÒª¸üĞÂ
-if ($needUpdate) {
-    try {
-        Write-Host "ÕıÔÚÏÂÔØ×îĞÂ°æ±¾..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZipPath
-        
-        # Çå¿ÕÄ¿±êÄ¿Â¼£¨±£ÁôÄ¿Â¼±¾Éí£©
-        Get-ChildItem -Path $assetsPath -Exclude version.json | Remove-Item -Force -Recurse
-        
-        Write-Host "½âÑ¹ÎÄ¼ş..."
-        Expand-Archive -Path $tempZipPath -DestinationPath $assetsPath -Force
-        
-        # ´´½¨/¸üĞÂversion.json
-        @{
-            commit = $latestCommit
-            tag    = $latestTag
-        } | ConvertTo-Json | Out-File -FilePath $versionFile -Force
-        
-        Write-Host "¸üĞÂ³É¹¦! °æ±¾: $latestTag"
-    }
-    catch {
-        Write-Error "ÏÂÔØ»ò½âÑ¹Ê§°Ü: $_"
-        exit 1
-    }
-    finally {
-        # ÇåÀíÁÙÊ±ÎÄ¼ş
-        if (Test-Path -Path $tempZipPath) {
-            Remove-Item -Path $tempZipPath -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-exit 0
