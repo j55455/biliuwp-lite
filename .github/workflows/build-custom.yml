@@ -27,8 +27,8 @@ jobs:
       - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.2
         with:
-          minimum-size: 32GB
-          maximum-size: 32GB
+          minimum-size: 64GB
+          maximum-size: 64GB
           disk-root: "C:"
 
       - name: Checkout repository
@@ -55,6 +55,9 @@ jobs:
           $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=muyan" -KeyUsage DigitalSignature -FriendlyName "BiliLite" -CertStoreLocation "Cert:\CurrentUser\My"
           Export-PfxCertificate -Cert $cert -FilePath "$env:UWP_Project_Directory\$env:SigningCertificate" -Password $pwd
           Export-Certificate -Cert $cert -FilePath "$env:UWP_Project_Directory\BiliLite.cer"
+          # 导入到 runner 受信任存储
+          Import-Certificate -FilePath "$env:UWP_Project_Directory\BiliLite.cer" -CertStoreLocation "Cert:\LocalMachine\Root"
+          Import-Certificate -FilePath "$env:UWP_Project_Directory\BiliLite.cer" -CertStoreLocation "Cert:\LocalMachine\TrustedPeople"
 
       - name: Update manifest version
         run: |
@@ -65,6 +68,9 @@ jobs:
       - name: Restore NuGet Packages
         run: |
           nuget restore $env:Solution_Path
+          if (Test-Path ".\packages") {
+            Copy-Item -Path ".\packages" -Destination ".\src\" -Recurse -Force
+          }
 
       - name: Build x64 Package
         run: |
@@ -76,7 +82,8 @@ jobs:
             /p:BuildMode=SideloadOnly `
             /p:AppxBundle=Never `
             /p:UapAppxPackageBuildMode=SideloadOnly `
-            /p:Use64BitCompiler=true
+            /p:Use64BitCompiler=true `
+            /m:1
         env:
           BuildMode: SideloadOnly
           Configuration: Release
