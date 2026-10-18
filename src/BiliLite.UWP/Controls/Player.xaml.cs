@@ -349,6 +349,9 @@ namespace BiliLite.Controls
 
             var passthrough = SettingService.GetValue<bool>(SettingConstants.Player.HARDWARE_DECODING, true);
             var _ffmpegConfig = new MediaSourceConfig();
+            // 修复：正确关联设置中的硬件解码开关。关闭硬件解码时强制走 FFmpeg 内置软解，绕过系统 HEVC/AV1 扩展限制和显卡驱动黑屏 Bug
+            _ffmpegConfig.VideoDecoderMode = passthrough ? VideoDecoderMode.Automatic : VideoDecoderMode.ForceFFmpegSoftwareDecoder;
+
             if (userAgent != null && userAgent.Length > 0)
             {
                 _ffmpegConfig.FFmpegOptions.Add("user_agent", userAgent);
@@ -363,6 +366,9 @@ namespace BiliLite.Controls
             _ffmpegConfig.FFmpegOptions.Add("reconnect", "1");
             _ffmpegConfig.FFmpegOptions.Add("reconnect_streamed", "1");
             _ffmpegConfig.FFmpegOptions.Add("reconnect_on_network_error", "1");
+            _ffmpegConfig.FFmpegOptions.Add("reconnect_delay_max", "5");
+            _ffmpegConfig.DefaultBufferTimeUri = TimeSpan.FromSeconds(15);
+            _ffmpegConfig.StreamBufferSize = 4 * 1024 * 1024;
             //_ffmpegConfig.BufferTime
             var ffmpegOptionsStr =
                 SettingService.GetValue(SettingConstants.Player.FFMPEG_INTEROP_X_OPTIONS, "");

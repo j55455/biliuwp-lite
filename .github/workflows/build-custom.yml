@@ -1,0 +1,124 @@
+name: Build Custom Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "构建版本号 (如 4.8.19.0)"
+        required: true
+        default: "4.8.19.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-x64:
+    runs-on: windows-2022
+
+    env:
+      SigningCertificate: BiliLite.UWP_TemporaryKey.pfx
+      SigningCertificatePasswd: "BiliLitePassword123"
+      Solution_Path: .\BiliLite.sln
+      AppName: BiliLite.Packages
+      UWP_Project_Directory: src\BiliLite.Packages
+      UWP_Project_Path: src\BiliLite.UWP\BiliLite.UWP.csproj
+
+    steps:
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+          minimum-size: 64GB
+          maximum-size: 64GB
+          disk-root: "C:"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup NuGet.exe
+        uses: nuget/setup-nuget@v2
+        with:
+          nuget-version: 'latest'
+
+      - name: Setup MSBuild.exe
+        uses: microsoft/setup-msbuild@v2
+
+      - uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.4
+        with:
+          sdk-version: 19041
+
+      - name: Generate Self-Signed Certificate
+        run: |
+          $pwd = ConvertTo-SecureString -String "${{ env.SigningCertificatePasswd }}" -Force -AsPlainText
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=muyan" -KeyUsage DigitalSignature -FriendlyName "BiliLite" -CertStoreLocation "Cert:\CurrentUser\My"
+          Export-PfxCertificate -Cert $cert -FilePath "$env:UWP_Project_Directory\$env:SigningCertificate" -Password $pwd
+          Export-Certificate -Cert $cert -FilePath "$env:UWP_Project_Directory\BiliLite.cer"
+          Import-Certificate -FilePath "$env:UWP_Project_Directory\BiliLite.cer" -CertStoreLocation "Cert:\LocalMachine\Root"
+          Import-Certificate -FilePath "$env:UWP_Project_Directory\BiliLite.cer" -CertStoreLocation "Cert:\LocalMachine\TrustedPeople"
+
+      - name: Update manifest version
+        run: |
+          [xml]$manifest = Get-Content ".\$env:UWP_Project_Directory\Package.appxmanifest"
+          $manifest.Package.Identity.Version = "${{ github.event.inputs.version }}"
+          $manifest.Save("$PWD\$env:UWP_Project_Directory\Package.appxmanifest")
+
+      - name: Restore Solution NuGet Packages
+        run: |
+          nuget restore $env:Solution_Path
+          if (Test-Path ".\packages") {
+            Copy-Item -Path ".\packages" -Destination ".\src\" -Recurse -Force
+          }
+
+      - name: Build x64 Package
+        run: |
+          msbuild $env:UWP_Project_Directory `
+            /p:Platform=x64 `
+            /p:Configuration=Release `
+            /p:PackageCertificateKeyFile=$env:SigningCertificate `
+            /p:PackageCertificatePassword=$env:SigningCertificatePasswd `
+            /p:BuildMode=SideloadOnly `
+            /p:Use64BitCompiler=true `
+            /restore
+        env:
+          BuildMode: SideloadOnly
+          Configuration: Release
+
+      - name: Package Output Archive
+        run: |
+          New-Item -ItemType Directory -Path C:\Artifacts -Force
+          $testDir = Get-ChildItem "$env:UWP_Project_Directory\AppPackages" -Directory | Where-Object { $_.Name -like "*x64_Test*" } | Select-Object -First 1
+          if ($testDir) {
+            Copy-Item "$env:UWP_Project_Directory\BiliLite.cer" "$($testDir.FullName)\"
+            Copy-Item "document\install-readme.md" "$($testDir.FullName)\安装说明.txt"
+            Get-ChildItem $testDir.FullName -Recurse -Filter "*.appxsym" | Remove-Item -Force
+            $zipPath = "C:\Artifacts\BiliLite_${{ github.event.inputs.version }}_x64_Optimized.zip"
+            Compress-Archive -Path "$($testDir.FullName)\*" -DestinationPath $zipPath -Force
+            echo "ZIP_PATH=$zipPath" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "AppPackages x64 output directory not found!"
+            exit 1
+          }
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BiliLite_${{ github.event.inputs.version }}_x64_Optimized
+          path: ${{ env.ZIP_PATH }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: "BiliLite v${{ github.event.inputs.version }} 优化版"
+          body: |
+            ### BiliLite 播放优化更新说明
+            - **修复硬件解码开关无效问题**：正确关联播放设置中的硬件解码开关，关闭时走内置 FFmpeg 软解，彻底避开系统 HEVC/AV1 扩展授权与显卡 10-bit 黑屏 Bug。
+            - **解决播放中途卡死/缓冲停滞**：调大网络流缓冲区为 4MB，增加 15s 预缓冲与断流智能重连机制。
+            - **修复 ShakaPlayer（网页播放器）窗口高度折叠黑屏**：移除异常的 Height = 0 锁死逻辑。
+            - **内置安装证书**：直接运行压缩包内的 Install.ps1 即可一键完成证书信任与应用安装。
+          files: ${{ env.ZIP_PATH }}
+          draft: false
+          prerelease: false
