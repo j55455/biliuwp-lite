@@ -63,11 +63,13 @@ jobs:
           $manifest.Package.Identity.Version = "${{ github.event.inputs.version }}"
           $manifest.Save("$PWD\$env:UWP_Project_Directory\Package.appxmanifest")
 
-      - name: Restore Solution NuGet Packages
+      - name: Restore Full NuGet Packages
         run: |
           nuget restore $env:Solution_Path
+          nuget restore src\BiliLite.Win32Tools\packages.config -PackagesDirectory src\packages
           if (Test-Path ".\packages") {
-            Copy-Item -Path ".\packages" -Destination ".\src\" -Recurse -Force
+            New-Item -ItemType Directory -Path ".\src\packages" -Force | Out-Null
+            Copy-Item -Path ".\packages\*" -Destination ".\src\packages\" -Recurse -Force
           }
 
       - name: Build x64 Package
@@ -77,22 +79,27 @@ jobs:
             /p:Configuration=Release `
             /p:PackageCertificateKeyFile=$env:SigningCertificate `
             /p:PackageCertificatePassword=$env:SigningCertificatePasswd `
-            /p:BuildMode=SideloadOnly `
-            /p:Use64BitCompiler=true `
-            /restore
+            /bl:C:\msbuild.binlog
         env:
           BuildMode: SideloadOnly
           Configuration: Release
 
+      - name: Upload Binlog on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msbuild-binlog
+          path: C:\msbuild.binlog
+
       - name: Package Output Archive
         run: |
-          New-Item -ItemType Directory -Path C:\Artifacts -Force
+          New-Item -ItemType Directory -Path C:\Package -Force
           $testDir = Get-ChildItem "$env:UWP_Project_Directory\AppPackages" -Directory | Where-Object { $_.Name -like "*x64_Test*" } | Select-Object -First 1
           if ($testDir) {
             Copy-Item "$env:UWP_Project_Directory\BiliLite.cer" "$($testDir.FullName)\"
             Copy-Item "document\install-readme.md" "$($testDir.FullName)\安装说明.txt"
             Get-ChildItem $testDir.FullName -Recurse -Filter "*.appxsym" | Remove-Item -Force
-            $zipPath = "C:\Artifacts\BiliLite_${{ github.event.inputs.version }}_x64_Optimized.zip"
+            $zipPath = "C:\Package\BiliLite_${{ github.event.inputs.version }}_x64_Optimized.zip"
             Compress-Archive -Path "$($testDir.FullName)\*" -DestinationPath $zipPath -Force
             echo "ZIP_PATH=$zipPath" >> $env:GITHUB_ENV
           } else {
